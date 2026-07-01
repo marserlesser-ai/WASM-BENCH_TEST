@@ -14,9 +14,4 @@ serde_json  = { version = "1", default-features = false, features = ["alloc"] }
 # Only needed on wasm32-unknown-unknown (no std allocator there)
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dlmalloc = { version = "0.2", features = ["global"] }
-
-[profile.release]
-opt-level     = "z"
-lto           = true
-codegen-units = 1
-panic         = "abort"
+# profiles must be defined at workspace root, not here

@@ -5,12 +5,15 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 
+# All profiles live here at workspace root (plugin's profile is ignored otherwise)
 [profile.release]
-opt-level      = 3
-lto            = true
-codegen-units  = 1
-strip          = true
+opt-level     = 3
+lto           = true
+codegen-units = 1
+strip         = true
 
-[profile.plugin-release]
+# Used when building the wasm32 plugin: smaller binary
+[profile.wasm]
 inherits      = "release"
-panic         = "abort"   # smaller wasm output
+opt-level     = "z"
+panic         = "abort"
