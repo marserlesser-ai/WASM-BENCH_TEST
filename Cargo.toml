@@ -1,0 +1,16 @@
+[workspace]
+members  = ["bench", "plugin"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+
+[profile.release]
+opt-level      = 3
+lto            = true
+codegen-units  = 1
+strip          = true
+
+[profile.plugin-release]
+inherits      = "release"
+panic         = "abort"   # smaller wasm output

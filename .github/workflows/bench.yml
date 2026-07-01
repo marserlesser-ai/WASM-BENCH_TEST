@@ -1,0 +1,208 @@
+name: bench
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:       # manual trigger from GitHub UI
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── build the native cdylib plugin (C ABI baseline) ───────────────────────
+  build-plugin:
+    name: Build native plugin (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-plugin-${{ hashFiles('plugin/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-plugin-
+
+      - name: Build native cdylib (C ABI)
+        run: cargo build --release -p plugin
+
+      - name: Build wasm32 plugin
+        run: cargo build --release -p plugin --target wasm32-unknown-unknown
+
+      - name: Upload native plugin (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-linux
+          path: target/release/libplugin.so
+
+      - name: Upload native plugin (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-macos
+          path: target/release/libplugin.dylib
+
+      - name: Upload native plugin (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-windows
+          path: target/release/plugin.dll
+
+      - name: Upload wasm32 plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-wasm32-${{ matrix.os }}
+          path: target/wasm32-unknown-unknown/release/plugin.wasm
+
+  # ── run the benchmark matrix ───────────────────────────────────────────────
+  bench:
+    name: Bench — ${{ matrix.runtime }} on ${{ matrix.os }}
+    needs: build-plugin
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        runtime:
+          - runtime-wasmi
+          - runtime-tinywasm
+          - runtime-stitch
+          - runtime-wasm3
+          - runtime-wasmtime
+          - runtime-silverfir
+          - runtime-cabi
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # wasm3 needs cmake + a C compiler
+      - name: Install cmake (Linux)
+        if: runner.os == 'Linux' && matrix.runtime == 'runtime-wasm3'
+        run: sudo apt-get install -y cmake
+
+      - name: Install cmake (macOS)
+        if: runner.os == 'macOS' && matrix.runtime == 'runtime-wasm3'
+        run: brew install cmake
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ matrix.runtime }}-${{ hashFiles('bench/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-${{ matrix.runtime }}-
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Build bench (${{ matrix.runtime }} only)
+        run: >
+          cargo build --release -p bench
+          --no-default-features
+          --features ${{ matrix.runtime }}
+
+      # Download the matching native plugin for C ABI run
+      - name: Download native plugin (Linux)
+        if: runner.os == 'Linux' && matrix.runtime == 'runtime-cabi'
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-linux
+          path: target/release/
+
+      - name: Download native plugin (macOS)
+        if: runner.os == 'macOS' && matrix.runtime == 'runtime-cabi'
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-macos
+          path: target/release/
+
+      - name: Download native plugin (Windows)
+        if: runner.os == 'Windows' && matrix.runtime == 'runtime-cabi'
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-windows
+          path: target/release/
+
+      - name: Run bench (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          LIB=$(ls target/release/libplugin.* 2>/dev/null | head -1 || echo "")
+          ./target/release/bench $LIB | tee bench-${{ matrix.runtime }}-${{ matrix.os }}.txt
+
+      - name: Run bench (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $lib = Get-ChildItem target/release/plugin.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          $libArg = if ($lib) { $lib.FullName } else { "" }
+          .\target\release\bench.exe $libArg | Tee-Object bench-${{ matrix.runtime }}-${{ matrix.os }}.txt
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.runtime }}-${{ matrix.os }}
+          path: bench-${{ matrix.runtime }}-${{ matrix.os }}.txt
+
+  # ── collate all results into one summary comment / artifact ───────────────
+  summarize:
+    name: Summarize results
+    needs: bench
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all result artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          merge-multiple: true
+          path: results/
+
+      - name: Combine into summary
+        run: |
+          echo "# BA-FB WASM Runtime Benchmark Results" > summary.md
+          echo "" >> summary.md
+          echo "Commit: ${{ github.sha }}" >> summary.md
+          echo "Date:   $(date -u)" >> summary.md
+          echo "" >> summary.md
+
+          for f in results/*.txt; do
+            label=$(basename "$f" .txt | sed 's/bench-//' | sed 's/-/ — /g')
+            echo "## $label" >> summary.md
+            echo '```' >> summary.md
+            cat "$f" >> summary.md
+            echo '```' >> summary.md
+            echo "" >> summary.md
+          done
+
+          cat summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload combined summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-summary
+          path: summary.md

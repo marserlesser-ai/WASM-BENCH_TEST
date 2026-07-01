@@ -1,0 +1,4 @@
+/target
+*.txt
+!README.md
+Cargo.lock   # committed for reproducibility in this repo — remove line if you prefer not to

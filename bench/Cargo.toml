@@ -1,0 +1,42 @@
+[package]
+name    = "bench"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "bench"
+path = "src/main.rs"
+
+[features]
+default = ["runtime-wasmi", "runtime-tinywasm", "runtime-stitch", "runtime-wasm3", "runtime-wasmtime", "runtime-silverfir", "runtime-cabi"]
+
+# Each runtime is an optional feature so you can build with a subset if one fails to compile.
+runtime-wasmi     = ["dep:wasmi"]
+runtime-tinywasm  = ["dep:tinywasm", "dep:tinywasm-parser"]
+runtime-stitch    = ["dep:makepad-stitch", "dep:wast"]
+runtime-wasm3     = ["dep:wasm3"]
+runtime-wasmtime  = ["dep:wasmtime"]
+runtime-silverfir = []          # git dep, see below
+runtime-cabi      = ["dep:libloading"]
+
+[dependencies]
+# ── interpreters / JITs ───────────────────────────────────────────────────────
+wasmi = { version = "1.1.0",        optional = true }
+
+tinywasm        = { version = "0.9.1", optional = true }
+tinywasm-parser = { version = "0.9.1", optional = true }
+
+makepad-stitch = { git = "https://github.com/makepad/stitch", optional = true }
+wast           = { version = "200",                            optional = true }   # stitch needs WAT->bytes
+
+wasm3    = { version = "0.3.1",  optional = true }
+wasmtime = { version = "46.0.1", optional = true }
+
+# Silverfir-nano: git dep pointing at sf-nano-core, the library crate
+sf-nano-core = { git = "https://github.com/mbbill/Silverfir-nano", optional = true }
+
+# ── cdylib loader ─────────────────────────────────────────────────────────────
+libloading = { version = "0.8", optional = true }
+
+# ── shared ────────────────────────────────────────────────────────────────────
+serde_json = "1"
