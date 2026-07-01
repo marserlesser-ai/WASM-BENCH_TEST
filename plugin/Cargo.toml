@@ -8,11 +8,15 @@ crate-type = ["cdylib"]
 
 [dependencies]
 flatbuffers = "24"
-serde       = { version = "1", features = ["derive"] }
+serde       = { version = "1", default-features = false, features = ["derive"] }
 serde_json  = { version = "1", default-features = false, features = ["alloc"] }
 
+# Only needed on wasm32-unknown-unknown (no std allocator there)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "0.2", features = ["global"] }
+
 [profile.release]
-opt-level     = "z"   # size matters for wasm distribution
+opt-level     = "z"
 lto           = true
 codegen-units = 1
 panic         = "abort"
