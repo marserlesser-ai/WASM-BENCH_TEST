@@ -41,6 +41,15 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      # wasm3-sys (transitive via bench) needs cmake + libclang for bindgen
+      - name: Install cmake + libclang (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y cmake libclang-dev
+
+      - name: Install cmake (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -120,11 +129,13 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cmake (Linux — needed for wasm3)
+      # wasm3-sys uses cmake to build the C library and bindgen to generate Rust bindings.
+      # bindgen requires libclang at build time.
+      - name: Install cmake + libclang (Linux — needed for wasm3)
         if: runner.os == 'Linux' && matrix.runtime == 'runtime-wasm3'
-        run: sudo apt-get install -y cmake
+        run: sudo apt-get install -y cmake libclang-dev
 
-      - name: Install cmake (macOS — needed for wasm3)
+      - name: Install cmake (macOS — needed for wasm3, clang already present via Xcode)
         if: runner.os == 'macOS' && matrix.runtime == 'runtime-wasm3'
         run: brew install cmake
 
